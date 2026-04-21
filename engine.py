@@ -12,7 +12,9 @@ MAX_STEPS = 100  # prevents infinite loop
 
 def _bucket_value(axis: str, value: str) -> str:
     if axis == "axis1":
-        if value.startswith("internal") or value in {"growth", "growth_soft", "fixed", "shift_internal"}:
+        if value.startswith("internal") or value in {
+            "growth", "growth_soft", "fixed", "shift_internal"
+        }:
             return "internal"
         if value.startswith("external"):
             return "external"
@@ -46,7 +48,6 @@ def _safe_pick(mapping: dict[str, str], key: Optional[str]) -> str:
         return mapping[key]
     if "default" in mapping:
         return mapping["default"]
-    # Fall back to any value (stable in CPython 3.7+ insertion order)
     return next(iter(mapping.values()), "")
 
 
@@ -56,12 +57,14 @@ def run_reflection(
     input_fn: Callable[[str], str] = input,
     output_fn: Callable[[str], None] = print,
     show_final_insight: bool = True,
-) -> list[str]:
+) -> dict[str, Any]:
+
     nodes = {node["id"]: node for node in data["nodes"]}
     signals: list[str] = []
     current: Optional[str] = "START"
 
     steps = 0
+    visited = set()  # NEW: loop detection
 
     def get_dominant(axis: str) -> Optional[str]:
         counts: dict[str, int] = {}
@@ -86,7 +89,6 @@ def run_reflection(
 
         if "interpolations" in node:
             for placeholder, mapping in node["interpolations"].items():
-                # Summary placeholders are handled specially below.
                 if node.get("type") == "summary" and placeholder.startswith("axis"):
                     continue
 
@@ -103,11 +105,11 @@ def run_reflection(
             interp = node["interpolations"]
             replacements = {
                 "axis1.summary": _safe_pick(interp.get("axis1.summary", {}), dom1),
-                "axis1.detail": _safe_pick(interp.get("axis1.detail", {}), dom1),
+                "axis1.detail":  _safe_pick(interp.get("axis1.detail",  {}), dom1),
                 "axis2.summary": _safe_pick(interp.get("axis2.summary", {}), dom2),
-                "axis2.detail": _safe_pick(interp.get("axis2.detail", {}), dom2),
+                "axis2.detail":  _safe_pick(interp.get("axis2.detail",  {}), dom2),
                 "axis3.summary": _safe_pick(interp.get("axis3.summary", {}), dom3),
-                "axis3.detail": _safe_pick(interp.get("axis3.detail", {}), dom3),
+                "axis3.detail":  _safe_pick(interp.get("axis3.detail",  {}), dom3),
             }
 
             cross_key = f"{dom1}+{dom2}+{dom3}" if (dom1 and dom2 and dom3) else None
@@ -148,15 +150,13 @@ def run_reflection(
         output_fn("FINAL REFLECTION")
         output_fn("=" * 50)
 
-        # Axis 1
         if a1 == "internal":
             output_fn("\nYou tended to take ownership of what happened.")
         elif a1 == "external":
             output_fn("\nYou experienced the situation as the main constraint.")
         else:
-            output_fn("\nYou’re still processing what happened — which is valid.")
+            output_fn("\nYou're still processing what happened — which is valid.")
 
-        # Axis 2
         if a2 == "contribution":
             output_fn("You focused on contributing rather than being recognized.")
         elif a2 == "entitlement":
@@ -166,7 +166,6 @@ def run_reflection(
         else:
             output_fn("You were managing your energy and pulling back when needed.")
 
-        # Axis 3
         if a3 == "self":
             output_fn("Your focus stayed mostly on your own workload.")
         elif a3 == "team":
@@ -187,8 +186,16 @@ def run_reflection(
 
         output_fn("_" * 50)
 
+    # ---------- MAIN LOOP ----------
+
     while current is not None and steps < MAX_STEPS:
         steps += 1
+
+        # NEW: loop detection
+        if current in visited:
+            output_fn(f"\nError: Loop detected at node '{current}'.")
+            break
+        visited.add(current)
 
         if current not in nodes:
             output_fn(f"\nError: Node '{current}' not found.")
@@ -223,25 +230,30 @@ def run_reflection(
             current = selected["next"]
 
         elif node.get("type") == "decision":
-            if "conditions" in node:
-                if "A1" in node["id"]:
+            conditions = node.get("conditions") or []
+
+            if not conditions:
+                current = node.get("target")
+            else:
+                node_id = node["id"]
+
+                if "A1" in node_id:
                     dom = get_dominant("axis1")
-                elif "A2" in node["id"]:
+                elif "A2" in node_id:
                     dom = get_dominant("axis2")
                 else:
                     dom = get_dominant("axis3")
 
                 matched = False
-                for cond in node["conditions"]:
-                    if dom and dom in cond["if"]:
+
+                for cond in conditions:
+                    if dom is not None and dom == cond["if"]:
                         current = cond["target"]
                         matched = True
                         break
 
                 if not matched:
-                    current = node["conditions"][0]["target"]
-            else:
-                current = node.get("target")
+                    current = conditions[0]["target"]
 
         else:
             if show_final_insight and node.get("type") == "summary":
@@ -251,4 +263,10 @@ def run_reflection(
     if steps >= MAX_STEPS:
         output_fn("\nStopped: Too many steps (possible loop issue).")
 
-    return signals
+    # ✅ STRUCTURED RETURN
+    return {
+        "axis1": get_dominant("axis1"),
+        "axis2": get_dominant("axis2"),
+        "axis3": get_dominant("axis3"),
+        "signals": signals,
+    }

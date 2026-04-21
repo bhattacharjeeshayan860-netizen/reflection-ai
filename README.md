@@ -13,6 +13,7 @@ Why this is useful (and internship-friendly): it demonstrates how to build a cle
 - **Interpreter-style runtime** in [engine.py](engine.py)
 - **Injectable I/O** (`input_fn` / `output_fn`) for future testing or alternate UIs
 - **Safety guardrail** (`MAX_STEPS`) to avoid infinite loops if the graph is miswired
+- **Optional Web UI** in [web.py](web.py) (local-only, no frameworks)
 
 ## Quick Start
 
@@ -32,6 +33,25 @@ If neither works, install Python from https://www.python.org/downloads/.
 
 - Choose answers by typing the option number.
 - Type `q` at any prompt to quit.
+
+### Web UI (Optional)
+
+Run the local web interface:
+
+```bash
+python web.py
+```
+
+Then open:
+
+- http://localhost:8000
+
+Notes:
+
+- Each browser gets its own session (cookie-based).
+- Use **Reset** to start over.
+- Use **Quit** to stop and show a short progress summary.
+- If the port is already in use, stop the other process using `8000` and retry.
 
 ## Example Run (What It Feels Like)
 
@@ -102,6 +122,7 @@ Nodes can define an `interpolations` mapping to replace placeholders in `text`.
 - [main.py](main.py): entry point (calls `run_reflection()`)
 - [engine.py](engine.py): interpreter (node execution, routing, bucketing, interpolation)
 - [data.py](data.py): reflection content, options, conditions, and copy
+- [web.py](web.py): minimal local web UI for the same engine
 - [requirements.txt](requirements.txt): intentionally empty
 
 ## Public API
@@ -114,7 +135,18 @@ run_reflection(
     input_fn=input,           # injectable input (for tests/UIs)
     output_fn=print,          # injectable output (for tests/UIs)
     show_final_insight=True,  # prints a computed “final reflection” section
-) -> list[str]                # collected signals
+) -> dict[str, Any]           # axis dominance + collected signals
+```
+
+Return shape:
+
+```python
+{
+  "axis1": "internal" | "external" | "processing" | None,
+  "axis2": "contribution" | "entitlement" | "neutral" | "conservation" | None,
+  "axis3": "self" | "dyadic" | "team" | "altrocentric" | None,
+  "signals": ["axis1:...", "axis2:...", ...],
+}
 ```
 
 Robustness behaviors:
@@ -154,13 +186,12 @@ This engine keeps decision logic intentionally simple:
   - if the node id contains `A1` → uses `axis1`
   - if it contains `A2` → uses `axis2`
   - otherwise → uses `axis3`
-- For `conditions`, it does a substring check: it routes to the first condition where the dominant bucket appears inside `condition["if"]`.
-
-That’s why the sample data uses strings like `"axis1.dominant == internal"`: the engine isn’t parsing the expression; it’s matching the token `internal`.
+- For `conditions`, it routes to the first entry where `dominant == condition["if"]`.
+- If nothing matches, it falls back to `conditions[0]["target"]`.
 
 ### A note about `meta.axes`
 
-In [data.py](data.py), `meta.axes` is descriptive (e.g., `locus`, `orientation`, `radius`). The runtime logic uses `axis1`, `axis2`, and `axis3` prefixes in `signal` strings. If you want, you can treat them as conceptual labels:
+In [data.py](data.py), `meta.axes` lists the runtime axis ids (`axis1`, `axis2`, `axis3`). You can treat them as conceptual labels:
 
 - `axis1` → locus / agency
 - `axis2` → contribution / recognition orientation
